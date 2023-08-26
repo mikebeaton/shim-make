@@ -54,38 +54,27 @@ get_ready () {
 
     mount_path ${SHIM_ROOT}
 
-    if [ ! -d shim ] ; then
+    if ! multipass exec ${OC_SHIM} -- test -d shim ; then
         echo
         echo "Cloning rhboot/shim..."
-        git clone https://github.com/rhboot/shim.git || exit 1
-        pushd shim 1>/dev/null || exit 1
-        git submodule update --init || exit 1
-        popd 1>/dev/null || exit 1
+        multipass exec ${OC_SHIM} -- git clone https://github.com/rhboot/shim.git || exit 1
+        multipass exec ${OC_SHIM} --working-directory shim -- git submodule update --init || exit 1
     else
-        pushd shim 1>/dev/null || exit 1
-        if ! git remote -v | grep "rhboot/shim" 1>/dev/null ; then
+        if ! multipass exec ${OC_SHIM} --working-directory shim -- git remote -v | grep "rhboot/shim" 1>/dev/null ; then
             echo "FATAL: Subdirectory shim is already present, but does not contain rhboot/shim!"
             exit 1
         fi
-        popd 1>/dev/null || exit 1
         echo "rhboot/shim already cloned..."
     fi
 
-    pushd shim 1>/dev/null || exit 1
-    if ! grep "${SHIM_ROOT}" Make.defaults 1>/dev/null ; then
+    if ! multipass exec ${OC_SHIM} --working-directory shim -- grep "${SHIM_ROOT}" Make.defaults 1>/dev/null ; then
         echo
         echo "Updating Make.defaults..."
-        TMP=mktmp || exit 1
-        cat Make.defaults | sed s^-DDEBUGDIR=\'L\"/usr/lib/debug/usr/share/shim/^-DDEBUGDIR=\'L\"${SHIM_ROOT}/usr/src/debug/^g > $TMP
-        cp "$TMP" Make.defaults
-        rm $TMP
+        multipass exec ${OC_SHIM} --working-directory shim -- sed -i s^-DDEBUGDIR=\'L\"/usr/lib/debug/usr/share/shim/^-DDEBUGDIR=\'L\"${SHIM_ROOT}/usr/src/debug/^g Make.defaults
         echo
     else
         echo "Make.defaults already updated..."
     fi
-    popd 1>/dev/null || exit 1
-
-    mount_path shim '~/shim'
 
     if ! multipass exec ${OC_SHIM} -- command -v gcc ] ; then
         echo "Installing dependencies..."
@@ -112,7 +101,7 @@ elif [ "$1" = "make" ] ; then
 elif [ "$1" = "install" ] ; then
     echo "Installing..."
     rm -rf ${SHIM_ROOT}/usr
-    multipass exec ${OC_SHIM} --working-directory shim DESTDIR=${SHIM_ROOT} EFIDIR="OC" OSLABEL="OpenCore" make install
+    multipass exec ${OC_SHIM} --working-directory shim -- DESTDIR=${SHIM_ROOT} EFIDIR="OC" OSLABEL="OpenCore" make install
     if [ ! "$2" = "" ] ; then
         echo "Installing to ESP ${2}..."
         cp ${SHIM_ROOT}/boot/efi/EFI/OC/* ${2}/EFI/OC || exit 1
