@@ -124,6 +124,51 @@ elif [ "$1" = "install" ] ; then
         echo "Installing to ESP ${2}..."
         cp ${SHIM_ROOT}/boot/efi/EFI/OC/* ${2}/EFI/OC || exit 1
     fi
+elif [ "$1" = "mount" ] ; then
+    #
+    # Useful for devel/debug only.
+    # Note: We are only mounting in the reverse direction because we get much faster build speeds.
+    #
+    if ! command -v sshfs 1>/dev/null ; then
+        echo "sshfs (https://osxfuse.github.io/) is required for mounting directories from multipass into macOS (https://github.com/canonical/multipass/issues/1070)"
+        exit 1
+    fi
+
+    if [ ! -d shim ] ; then
+        echo "Making subdirectory shim..."
+        mkdir shim || exit 1
+    fi
+
+    ls shim 1>/dev/null
+    if [ $? -ne 0 ] ; then
+        echo "Directory may be mounted but not ready (no authorized key?)"
+        echo "Try: umount shim"
+        exit 1
+    fi
+
+    if mount | grep ":shim" ; then
+        echo "Already mounted"
+        exit 0
+    fi
+
+    if [ $(ls -1 shim | wc -l) -ne 0 ] ; then
+        echo "Subdirectory shim is not empty!"
+        exit 1
+    fi
+
+    IP=$(multipass info ${OC_SHIM} | grep IPv4 | cut -d ":" -f 2 | sed 's/ //g')
+    if [ "${IP}" = "" ] ; then
+        echo "Cannot obtain IPv4 for ${OC_SHIM}"
+        exit 1
+    fi
+    if sshfs ubuntu@${IP}:shim shim ; then
+        echo "Mounted at $(pwd)/shim"
+        exit 0
+    else
+        umount shim
+        echo "Directory cannot be mounted, add your ssh public key to .ssh/authorized_keys in the VM and try again."
+        exit 1
+    fi
 else
     echo "Unrecognised option: $1"
     exit 1
