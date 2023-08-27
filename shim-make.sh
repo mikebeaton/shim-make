@@ -54,8 +54,17 @@ get_ready () {
 
     mount_path ${SHIM_ROOT}
 
+    #
+    # For debug/develop purposes, it would be nicer to keep the source code in
+    # macOS, just mounted and built in multipass, but the build is about 1/3 the
+    # speed of building in a native multipass directory.
+    # For the purposes of having a fast build, but code which can be opened e.g.
+    # within an IDE within macOS, sshfs can be used to mount out from multipass
+    # to macOS:
+    #  - https://github.com/canonical/multipass/issues/1070
+    #  - https://osxfuse.github.io/
+    #
     if ! multipass exec ${OC_SHIM} -- test -d shim ; then
-        echo
         echo "Cloning rhboot/shim..."
         multipass exec ${OC_SHIM} -- git clone https://github.com/rhboot/shim.git || exit 1
         multipass exec ${OC_SHIM} --working-directory shim -- git submodule update --init || exit 1
@@ -67,16 +76,25 @@ get_ready () {
         echo "rhboot/shim already cloned..."
     fi
 
-    if ! multipass exec ${OC_SHIM} --working-directory shim -- grep "${SHIM_ROOT}" Make.defaults 1>/dev/null ; then
-        echo
-        echo "Updating Make.defaults..."
-        multipass exec ${OC_SHIM} --working-directory shim -- sed -i s^-DDEBUGDIR=\'L\"/usr/lib/debug/usr/share/shim/^-DDEBUGDIR=\'L\"${SHIM_ROOT}/usr/src/debug/^g Make.defaults
-        echo
+    # Both modifications to Make.defaults only required for debugging
+    FOUND=$(multipass exec ${OC_SHIM} --working-directory shim -- grep "gdwarf" Make.defaults | wc -l)
+    if [ $FOUND -eq 0 ] ; then
+        echo "Updating Make.defaults gdwarf flags..."
+        multipass exec ${OC_SHIM} --working-directory shim -- sed -i 's^-ggdb \\^-ggdb -gdwarf-4 -gstrict-dwarf \\^g' Make.defaults
     else
-        echo "Make.defaults already updated..."
+        echo "Make.defaults gdwarf flags already updated..."
     fi
 
-    if ! multipass exec ${OC_SHIM} -- command -v gcc ] ; then
+    FOUND=$(multipass exec ${OC_SHIM} --working-directory shim -- grep "${SHIM_ROOT}" Make.defaults | wc -l)
+    if [ $FOUND -eq 0 ] ; then
+        echo "Updating Make.defaults debug directory..."
+        multipass exec ${OC_SHIM} --working-directory shim -- sed -i s^-DDEBUGDIR=\'L\"/usr/lib/debug/usr/share/shim/$\(ARCH_SUFFIX\)-$\(VERSION\)$\(DASHRELEASE\)/\"\'^-DDEBUGDIR=\'L\"${SHIM_ROOT}/usr/lib/debug/boot/efi/EFI/OC/\"\'^g Make.defaults
+    else
+        echo "Make.defaults debug directory already updated..."
+    fi
+
+    FOUND=$(multipass exec ${OC_SHIM} -- command -v gcc | wc -l)
+    if [ $FOUND -eq 0 ] ; then
         echo "Installing dependencies..."
         multipass exec ${OC_SHIM} -- sudo apt-get update
         multipass exec ${OC_SHIM} -- sudo apt install -y gcc make git libelf-dev
