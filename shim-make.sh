@@ -8,7 +8,8 @@
 # and set 605dab50-e046-4300-abb6-3dd810dd8b23:SHIM_DEBUG to (UINT8)1 (<data>AQ==</data>) in NVRAM
 #
 
-SHIM_ROOT=~/shim_root
+ROOT=~/shim_root
+SHIM=~/OpenSource/shim
 OC_SHIM=oc-shim
 
 mount_path () {
@@ -52,7 +53,7 @@ get_ready () {
         echo "${OC_SHIM} multipass instance already launched..."
     fi
 
-    mount_path ${SHIM_ROOT}
+    mount_path ${ROOT}
 
     #
     # For debug/develop purposes, it would be nicer to keep the source code in
@@ -64,31 +65,31 @@ get_ready () {
     #  - https://github.com/canonical/multipass/issues/1070
     #  - https://osxfuse.github.io/
     #
-    if ! multipass exec ${OC_SHIM} -- test -d shim ; then
+    if ! multipass exec ${OC_SHIM} -- test -d ${SHIM} ; then
         echo "Cloning rhboot/shim..."
-        multipass exec ${OC_SHIM} -- git clone https://github.com/rhboot/shim.git || exit 1
-        multipass exec ${OC_SHIM} --working-directory shim -- git submodule update --init || exit 1
+        multipass exec ${OC_SHIM} -- git clone https://github.com/rhboot/shim.git ${SHIM} || exit 1
+        multipass exec ${OC_SHIM} --working-directory ${SHIM} -- git submodule update --init || exit 1
     else
-        if ! multipass exec ${OC_SHIM} --working-directory shim -- git remote -v | grep "rhboot/shim" 1>/dev/null ; then
-            echo "FATAL: Subdirectory shim is already present, but does not contain rhboot/shim!"
+        if ! multipass exec ${OC_SHIM} --working-directory ${SHIM} -- git remote -v | grep "rhboot/shim" 1>/dev/null ; then
+            echo "FATAL: VM subdirectory ${SHIM} is already present, but does not contain rhboot/shim!"
             exit 1
         fi
         echo "rhboot/shim already cloned..."
     fi
 
     # Both modifications to Make.defaults only required for debugging
-    FOUND=$(multipass exec ${OC_SHIM} --working-directory shim -- grep "gdwarf" Make.defaults | wc -l)
+    FOUND=$(multipass exec ${OC_SHIM} --working-directory ${SHIM} -- grep "gdwarf" Make.defaults | wc -l)
     if [ $FOUND -eq 0 ] ; then
         echo "Updating Make.defaults gdwarf flags..."
-        multipass exec ${OC_SHIM} --working-directory shim -- sed -i 's^-ggdb \\^-ggdb -gdwarf-4 -gstrict-dwarf \\^g' Make.defaults
+        multipass exec ${OC_SHIM} --working-directory ${SHIM} -- sed -i 's^-ggdb \\^-ggdb -gdwarf-4 -gstrict-dwarf \\^g' Make.defaults
     else
         echo "Make.defaults gdwarf flags already updated..."
     fi
 
-    FOUND=$(multipass exec ${OC_SHIM} --working-directory shim -- grep "${SHIM_ROOT}" Make.defaults | wc -l)
+    FOUND=$(multipass exec ${OC_SHIM} --working-directory ${SHIM} -- grep "${ROOT}" Make.defaults | wc -l)
     if [ $FOUND -eq 0 ] ; then
         echo "Updating Make.defaults debug directory..."
-        multipass exec ${OC_SHIM} --working-directory shim -- sed -i s^-DDEBUGDIR=\'L\"/usr/lib/debug/usr/share/shim/$\(ARCH_SUFFIX\)-$\(VERSION\)$\(DASHRELEASE\)/\"\'^-DDEBUGDIR=\'L\"${SHIM_ROOT}/usr/lib/debug/boot/efi/EFI/OC/\"\'^g Make.defaults
+        multipass exec ${OC_SHIM} --working-directory ${SHIM} -- sed -i s^-DDEBUGDIR=\'L\"/usr/lib/debug/usr/share/shim/$\(ARCH_SUFFIX\)-$\(VERSION\)$\(DASHRELEASE\)/\"\'^-DDEBUGDIR=\'L\"${ROOT}/usr/lib/debug/boot/efi/EFI/OC/\"\'^g Make.defaults
     else
         echo "Make.defaults debug directory already updated..."
     fi
@@ -111,18 +112,18 @@ if [ "$1" = "" ] ; then
     echo
 elif [ "$1" = "clean" ] ; then
     echo "Cleaning..."
-    multipass exec ${OC_SHIM} --working-directory shim -- make clean
+    multipass exec ${OC_SHIM} --working-directory ${SHIM} -- make clean
 elif [ "$1" = "make" ] ; then
     echo "Making..."
     shift
-    multipass exec ${OC_SHIM} --working-directory shim -- make DEFAULT_LOADER="\\\\\\\\OpenCore.efi" "$@"
+    multipass exec ${OC_SHIM} --working-directory ${SHIM} -- make DEFAULT_LOADER="\\\\\\\\OpenCore.efi" "$@"
 elif [ "$1" = "install" ] ; then
     echo "Installing..."
-    rm -rf ${SHIM_ROOT}/usr
-    multipass exec ${OC_SHIM} --working-directory shim -- DESTDIR=${SHIM_ROOT} EFIDIR="OC" OSLABEL="OpenCore" make install
+    rm -rf ${ROOT}/usr
+    multipass exec ${OC_SHIM} --working-directory ${SHIM} -- DESTDIR=${ROOT} EFIDIR="OC" OSLABEL="OpenCore" make install
     if [ ! "$2" = "" ] ; then
         echo "Installing to ESP ${2}..."
-        cp ${SHIM_ROOT}/boot/efi/EFI/OC/* ${2}/EFI/OC || exit 1
+        cp ${ROOT}/boot/efi/EFI/OC/* ${2}/EFI/OC || exit 1
     fi
 elif [ "$1" = "mount" ] ; then
     #
@@ -134,25 +135,25 @@ elif [ "$1" = "mount" ] ; then
         exit 1
     fi
 
-    if [ ! -d shim ] ; then
-        echo "Making subdirectory shim..."
-        mkdir shim || exit 1
+    if [ ! -d ${SHIM} ] ; then
+        echo "Making local directory ${SHIM}..."
+        mkdir -p ${SHIM} || exit 1
     fi
 
-    ls shim 1>/dev/null
+    ls ${SHIM} 1>/dev/null
     if [ $? -ne 0 ] ; then
         echo "Directory may be mounted but not ready (no authorized key?)"
-        echo "Try: umount shim"
+        echo "Try: umount ${SHIM}"
         exit 1
     fi
 
-    if mount | grep ":shim" ; then
-        echo "Already mounted"
+    if mount | grep ":${SHIM}" ; then
+        echo "Already mounted at ${SHIM}"
         exit 0
     fi
 
-    if [ $(ls -1 shim | wc -l) -ne 0 ] ; then
-        echo "Subdirectory shim is not empty!"
+    if [ $(ls -1 ${SHIM} | wc -l) -ne 0 ] ; then
+        echo "Directory ${SHIM} is not empty!"
         exit 1
     fi
 
@@ -161,11 +162,11 @@ elif [ "$1" = "mount" ] ; then
         echo "Cannot obtain IPv4 for ${OC_SHIM}"
         exit 1
     fi
-    if sshfs ubuntu@${IP}:shim shim ; then
-        echo "Mounted at $(pwd)/shim"
+    if sshfs ubuntu@${IP}:${SHIM} ${SHIM} ; then
+        echo "Mounted at ${SHIM}"
         exit 0
     else
-        umount shim
+        umount ${SHIM}
         echo "Directory cannot be mounted, add your ssh public key to .ssh/authorized_keys in the VM and try again."
         exit 1
     fi
