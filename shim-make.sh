@@ -116,7 +116,7 @@ elif [ "$1" = "clean" ] ; then
 elif [ "$1" = "make" ] ; then
     echo "Making..."
     shift
-    multipass exec ${OC_SHIM} --working-directory ${SHIM} -- make DEFAULT_LOADER="\\\\\\\\OpenCore.efi" "$@"
+    multipass exec ${OC_SHIM} --working-directory ${SHIM} -- make DEFAULT_LOADER="\\\\\\\\OpenCore.efi" OVERRIDE_SECURITY_POLICY=1 "$@"
 elif [ "$1" = "install" ] ; then
     echo "Installing..."
     rm -rf ${ROOT}/usr
