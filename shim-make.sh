@@ -126,6 +126,11 @@ elif [ "$1" = "install" ] ; then
         cp ${ROOT}/boot/efi/EFI/OC/* ${2}/EFI/OC || exit 1
     fi
 elif [ "$1" = "mount" ] ; then
+    MOUNT="$2"
+    if [ "${MOUNT}" = "" ] ; then
+        MOUNT="${SHIM}"
+    fi
+
     #
     # Useful for devel/debug only.
     # Note: We are only mounting in the reverse direction because we get much faster build speeds.
@@ -135,25 +140,25 @@ elif [ "$1" = "mount" ] ; then
         exit 1
     fi
 
-    if [ ! -d ${SHIM} ] ; then
-        echo "Making local directory ${SHIM}..."
-        mkdir -p ${SHIM} || exit 1
+    if [ ! -d ${MOUNT} ] ; then
+        echo "Making local directory ${MOUNT}..."
+        mkdir -p ${MOUNT} || exit 1
     fi
 
-    ls ${SHIM} 1>/dev/null
+    ls ${MOUNT} 1>/dev/null
     if [ $? -ne 0 ] ; then
         echo "Directory may be mounted but not ready (no authorized key?)"
-        echo "Try: umount ${SHIM}"
+        echo "Try: umount ${MOUNT}"
         exit 1
     fi
 
-    if mount | grep ":${SHIM}" ; then
-        echo "Already mounted at ${SHIM}"
+    if mount | grep ":${MOUNT}" ; then
+        echo "Already mounted at ${MOUNT}"
         exit 0
     fi
 
-    if [ $(ls -1 ${SHIM} | wc -l) -ne 0 ] ; then
-        echo "Directory ${SHIM} is not empty!"
+    if [ $(ls -1 ${MOUNT} | wc -l) -ne 0 ] ; then
+        echo "Directory ${MOUNT} is not empty!"
         exit 1
     fi
 
@@ -162,11 +167,11 @@ elif [ "$1" = "mount" ] ; then
         echo "Cannot obtain IPv4 for ${OC_SHIM}"
         exit 1
     fi
-    if sshfs ubuntu@${IP}:${SHIM} ${SHIM} ; then
-        echo "Mounted at ${SHIM}"
+    if sshfs ubuntu@${IP}:$(realpath ${MOUNT}) ${MOUNT} ; then
+        echo "Mounted at ${MOUNT}"
         exit 0
     else
-        umount ${SHIM}
+        umount ${MOUNT}
         echo "Directory cannot be mounted, add your ssh public key to .ssh/authorized_keys in the VM and try again."
         exit 1
     fi
