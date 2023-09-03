@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 #
 # Copyright © 2023 Mike Beaton. All rights reserved.
 # SPDX-License-Identifier: BSD-3-Clause
@@ -8,9 +8,44 @@
 # and set 605dab50-e046-4300-abb6-3dd810dd8b23:SHIM_DEBUG to (UINT8)1 (<data>AQ==</data>) in NVRAM
 #
 
-ROOT=~/shim_root
-SHIM=~/OpenSource/shim
-OC_SHIM=oc-shim
+unamer() {
+  NAME="$(uname)"
+
+  if [ "$(echo "${NAME}" | grep MINGW)" != "" ] || [ "$(echo "${NAME}" | grep MSYS)" != "" ]; then
+    echo "Windows"
+  else
+    echo "${NAME}"
+  fi
+}
+
+usage() {
+    echo "Usage:"
+    echo " ./${SELFNAME} [args] [setup|clean|make [options]|install [esp-root-path]|mount [multipass-path]]"
+    echo
+    echo "Args:"
+    echo "  -r : Specify shim output root, default" ~/shim_root
+    echo "  -s : Specify shim source location, default" ~/OpenSource/shim
+    echo "If used -r/-s:"
+    echo " - Should be specified on every call, they are not remembered from setup"
+    echo " - Should be specified before the ${SELFNAME} command"
+    echo
+    echo "Examples:"
+    echo "  ./${SELFNAME} setup (sets up directories and installs rhboot/shim source)"
+    echo "  ./${SELFNAME} clean (cleans after previous make)"
+    LOCATION="."
+    if [ $DARWIN -eq 1 ] ; then
+        LOCATION="${ROOT}"
+    fi
+    echo -n "  ./${SELFNAME} make VENDOR_DB_FILE=${LOCATION}/combined/vendor.db VENDOR_DBX_FILE=${LOCATION}/combined/vendor.dbx (makes shim with db and dbx contents"
+    if [ $DARWIN -eq 1 ] ; then
+        echo -n "; note VENDOR_DB_FILE and VENDOR_DBX_FILE are inside a directory shared with VM"
+    fi
+    echo ")"
+    echo "  ./${SELFNAME} install /Volumes/EFI (installs made files to ESP mounted at /Volumes/EFI)"
+    echo
+    echo "After installation shimx64.efi and mmx64.efi must be signed by user ISK; OpenCore.efi must have an .sbat section added and be signed by user ISK."
+    echo ""
+}
 
 mount_path () {
     SRC=$1
@@ -56,10 +91,10 @@ get_ready () {
     mount_path ${ROOT}
 
     #
-    # For debug/develop purposes, it would be nicer to keep the source code in
-    # macOS, just mounted and built in multipass, but the build is about 1/3 the
-    # speed of building in a native multipass directory.
-    # For the purposes of having a fast build, but code which can be opened e.g.
+    # For debug/develop purposes it would be nicer to keep the source code in macOS,
+    # just mounted and built in multipass, but the build is about 1/3 the speed of
+    # building in a native multipass directory.
+    # For the purposes of having a fast build but code which can be opened e.g.
     # within an IDE within macOS, sshfs can be used to mount out from multipass
     # to macOS:
     #  - https://github.com/canonical/multipass/issues/1070
@@ -77,21 +112,33 @@ get_ready () {
         echo "rhboot/shim already cloned..."
     fi
 
-    # Both modifications to Make.defaults only required for debugging
+    echo "Make.defaults:"
+
+    # These two modifications to Make.defaults only required for debugging
     FOUND=$(multipass exec ${OC_SHIM} --working-directory ${SHIM} -- grep "gdwarf" Make.defaults | wc -l)
     if [ $FOUND -eq 0 ] ; then
-        echo "Updating Make.defaults gdwarf flags..."
+        echo "  Updating gdwarf flags..."
         multipass exec ${OC_SHIM} --working-directory ${SHIM} -- sed -i 's^-ggdb \\^-ggdb -gdwarf-4 -gstrict-dwarf \\^g' Make.defaults
     else
-        echo "Make.defaults gdwarf flags already updated..."
+        echo "  gdwarf flags already updated..."
     fi
 
     FOUND=$(multipass exec ${OC_SHIM} --working-directory ${SHIM} -- grep "${ROOT}" Make.defaults | wc -l)
     if [ $FOUND -eq 0 ] ; then
-        echo "Updating Make.defaults debug directory..."
+        echo "  Updating debug directory..."
         multipass exec ${OC_SHIM} --working-directory ${SHIM} -- sed -i s^-DDEBUGDIR=\'L\"/usr/lib/debug/usr/share/shim/$\(ARCH_SUFFIX\)-$\(VERSION\)$\(DASHRELEASE\)/\"\'^-DDEBUGDIR=\'L\"${ROOT}/usr/lib/debug/boot/efi/EFI/OC/\"\'^g Make.defaults
     else
-        echo "Make.defaults debug directory already updated..."
+        echo "  Debug directory already updated..."
+    fi
+
+    # Work-around for https://github.com/rhboot/shim/issues/596
+    FOUND=$(multipass exec ${OC_SHIM} --working-directory ${SHIM} -- grep "export DEFINES" Make.defaults | wc -l)
+    if [ $FOUND -eq 0 ] ; then
+        echo "  Updating exports..."
+        # var assignment to make output piping work normally
+        temp=$(echo "export DEFINES" | multipass exec ${OC_SHIM} --working-directory ${SHIM} -- tee -a Make.defaults) 1>/dev/null
+    else
+        echo "  Exports already updated..."
     fi
 
     FOUND=$(multipass exec ${OC_SHIM} -- command -v gcc | wc -l)
@@ -104,19 +151,56 @@ get_ready () {
     fi
 }
 
-if [ "$1" = "" ] ; then
+ROOT=~/shim_root
+SHIM=~/OpenSource/shim
+OC_SHIM=oc-shim
+
+SELFNAME="$(/usr/bin/basename "${0}")"
+
+DARWIN=0
+
+if [ "$(unamer)" = "Darwin" ] ; then
+    DARWIN=1
+fi
+
+OPTS=0
+while [ "${1:0:1}" = "-" ] ; do
+    OPTS=1
+    if [ "$1" = "-r" ] ; then
+        shift
+        if [ "$1" != "" ] && ! [ "${1:0:1}" = "-" ] ; then
+            ROOT=$1
+            shift
+        else
+            echo "No root directory specified" && exit 1
+        fi
+    elif [ "$1" = "-s" ] ; then
+        shift
+        if [ "$1" != "" ] && ! [ "${1:0:1}" = "-" ] ; then
+            SHIM=$1
+            shift
+        else
+            echo "No shim directory specified" && exit 1
+        fi
+    else
+        echo "Unknown option: $1"
+        exit 1
+    fi
+done
+
+if [ "$1" = "setup" ] ; then
     get_ready
     echo "Installation complete."
-    echo
-    echo "Usage: $0 [clean|make <options>|install <esp-root-path>]"
-    echo
+    exit 0
 elif [ "$1" = "clean" ] ; then
     echo "Cleaning..."
     multipass exec ${OC_SHIM} --working-directory ${SHIM} -- make clean
+    exit 0
 elif [ "$1" = "make" ] ; then
     echo "Making..."
     shift
     multipass exec ${OC_SHIM} --working-directory ${SHIM} -- make DEFAULT_LOADER="\\\\\\\\OpenCore.efi" OVERRIDE_SECURITY_POLICY=1 "$@"
+    exit 0
 elif [ "$1" = "install" ] ; then
     echo "Installing..."
     rm -rf ${ROOT}/usr
@@ -125,6 +209,7 @@ elif [ "$1" = "install" ] ; then
         echo "Installing to ESP ${2}..."
         cp ${ROOT}/boot/efi/EFI/OC/* ${2}/EFI/OC || exit 1
     fi
+    exit 0
 elif [ "$1" = "mount" ] ; then
     MOUNT="$2"
     if [ "${MOUNT}" = "" ] ; then
@@ -175,7 +260,15 @@ elif [ "$1" = "mount" ] ; then
         echo "Directory cannot be mounted, add your ssh public key to .ssh/authorized_keys in the VM and try again."
         exit 1
     fi
+    exit 0
+elif [ "$1" = "" ] ; then
+    if [ $OPTS -eq 0 ] ; then
+        usage
+    else
+        echo "No command specified."
+    fi
+    exit 1
 else
-    echo "Unrecognised option: $1"
+    echo "Unkown command: $1"
     exit 1
 fi
