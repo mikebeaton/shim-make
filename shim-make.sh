@@ -114,8 +114,18 @@ get_ready () {
         mount_path "${ROOT}"
     fi
 
-    # Make sure parent directory exists
-    #shim_command . sudo mkdir -p "'$(dirname "${SHIM}")'" || exit 1
+    FOUND=$(shim_command . command -v gcc | wc -l)
+    if [ $FOUND -eq 0 ] ; then
+        echo "Installing dependencies..."
+        if command -v dnf 1>/dev/null ; then
+            shim_command . sudo dnf install -y gcc make git elfutils-libelf-devel sbsigntools efitools
+        else
+            shim_command . sudo apt-get update
+            shim_command . sudo apt install -y gcc make git libelf-dev sbsigntools efitools
+        fi
+    else
+        echo "Dependencies already installed..."
+    fi
 
     #
     # For debug/develop purposes on Darwin it would be nicer to keep the source code in
@@ -129,7 +139,7 @@ get_ready () {
     #
     if ! shim_command . test -d "'${SHIM}'"  ; then
         echo "Cloning rhboot/shim..."
-        shim_command . git clone https://github.com/rhboot/shim.git "'${SHIM}'"  || exit 1
+        shim_command . git clone https://github.com/rhboot/shim.git "'${SHIM}'" || exit 1
         shim_command "${SHIM}" git submodule update --init || exit 1
     else
         if ! shim_command "${SHIM}" git remote -v | grep "rhboot/shim" 1>/dev/null ; then
@@ -167,21 +177,10 @@ get_ready () {
     else
         echo "  Exports already updated..."
     fi
-
-    FOUND=$(shim_command . command -v gcc | wc -l)
-    if [ $FOUND -eq 0 ] ; then
-        echo "Installing dependencies..."
-        shim_command . sudo apt-get update
-        shim_command . sudo apt install -y gcc make git libelf-dev
-    else
-        echo "Dependencies already installed..."
-    fi
 }
 
-# ROOT=~/shim_root
-# SHIM=~/OpenSource/shim
-ROOT=~/shim\ root
-SHIM=~/Open\ Source/my\ shim
+ROOT=~/shim_root
+SHIM=~/shim_source
 OC_SHIM=oc-shim
 
 SELFNAME="$(/usr/bin/basename "${0}")"
